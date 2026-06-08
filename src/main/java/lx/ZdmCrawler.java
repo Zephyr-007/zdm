@@ -52,6 +52,7 @@ import cn.hutool.http.HttpException;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpUtil;
 import lx.mapper.ZdmMapper;
+import lx.model.CrawlMode;
 import lx.model.Zdm;
 import lx.utils.StreamUtils;
 import lx.utils.Utils;
@@ -73,14 +74,16 @@ public class ZdmCrawler {
         int maxPageSize = Integer.parseInt(envMap.getOrDefault("maxPageSize", "10")),
                 minVoted = Integer.parseInt(envMap.getOrDefault("minVoted", "0")),
                 minComments = Integer.parseInt(envMap.getOrDefault("minComments", "0")),
+                searchMaxPageSize = Integer.parseInt(envMap.getOrDefault("searchMaxPageSize", "1")),
+                searchMinVoted = Integer.parseInt(envMap.getOrDefault("searchMinVoted", "0")),
+                searchMinComments = Integer.parseInt(envMap.getOrDefault("searchMinComments", "0")),
                 minPushSize = Integer.parseInt(envMap.getOrDefault("MIN_PUSH_SIZE", "0"));
         boolean detail = "true".equals(envMap.getOrDefault("detail", "false"));
+        CrawlMode crawlMode = CrawlMode.from(envMap.getOrDefault("crawlMode", "ranking"));
 
-        //获取待推送的优惠信息
-        Collection<Zdm> zdms = obtainUnpushedArticles(maxPageSize);
-
-        //根据各项规则执行过滤逻辑
-        zdms = processFilter(zdms, minVoted, minComments, detail);
+        //获取并过滤待推送的优惠信息
+        Collection<Zdm> zdms = obtainUnpushedArticles(maxPageSize, searchMaxPageSize, minVoted, minComments,
+                searchMinVoted, searchMinComments, crawlMode, detail);
         System.out.println("过滤后剩余数据条数" + zdms.size());
 
         //在推送之前先入库数据,pushed字段默认为0(未推送)
@@ -107,7 +110,9 @@ public class ZdmCrawler {
         });
     }
 
-    private static Collection<Zdm> obtainUnpushedArticles(int maxPageSize) {
+    private static Collection<Zdm> obtainUnpushedArticles(int maxPageSize, int searchMaxPageSize, int minVoted,
+                                                          int minComments, int searchMinVoted, int searchMinComments,
+                                                          CrawlMode crawlMode, boolean detail) {
         //GitHub Actions部署的服务器一般在海外,调整为东八区的时区
         ZoneId zoneId = ZoneId.of("GMT+8");
         TimeZone.setDefault(TimeZone.getTimeZone(zoneId));
@@ -115,8 +120,32 @@ public class ZdmCrawler {
         //上次执行后未推送的优惠信息
         List<Zdm> unPush = ZdmMapper.unPush();
 
-        //从网页上获取的优惠信息
-        Stream<Zdm> crawled = ZDM_URL.stream().flatMap(url -> {
+        //从网页上获取并按不同数据源阈值过滤的优惠信息
+        List<Zdm> filtered = new ArrayList<>();
+        if (crawlMode.enableRanking()) {
+            filtered.addAll(processFilter(obtainRankingArticles(maxPageSize, zoneId), minVoted, minComments, detail));
+        }
+        if (crawlMode.enableSearch()) {
+            SearchArticleCrawler searchArticleCrawler = new SearchArticleCrawler(ZdmCrawler::buildCookies, ZdmCrawler::clearCookie);
+            filtered.addAll(processFilter(searchArticleCrawler.obtainSearchArticles(searchMaxPageSize, detail),
+                    searchMinVoted, searchMinComments, detail));
+        }
+
+        int unPushMinVoted = crawlMode == CrawlMode.SEARCH ? searchMinVoted : minVoted;
+        int unPushMinComments = crawlMode == CrawlMode.SEARCH ? searchMinComments : minComments;
+        if (crawlMode == CrawlMode.BOTH) {
+            unPushMinVoted = Math.min(minVoted, searchMinVoted);
+            unPushMinComments = Math.min(minComments, searchMinComments);
+        }
+        filtered.addAll(processFilter(unPush, unPushMinVoted, unPushMinComments, detail));
+
+        return filtered.stream()
+                .sorted(Comparator.comparing(Zdm::getComments, Comparator.comparingInt(Integer::parseInt)).reversed())    //评论数量倒序,用LinkedHashSet保证有序
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private static List<Zdm> obtainRankingArticles(int maxPageSize, ZoneId zoneId) {
+        return ZDM_URL.stream().flatMap(url -> {
             List<Zdm> zdmPage = new ArrayList<>();
             int interval = 1000;
             for (int i = 1; i <= maxPageSize; i++) {
@@ -140,11 +169,7 @@ public class ZdmCrawler {
                 interval += i * 50;
             }
             return zdmPage.stream();
-        });
-
-        return Stream.concat(crawled, unPush.stream())  //两个stream合并,一起参与排序和去重操作
-                .sorted(Comparator.comparing(Zdm::getComments, Comparator.comparingInt(Integer::parseInt)).reversed())    //评论数量倒序,用LinkedHashSet保证有序
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+        }).collect(Collectors.toList());
     }
 
     private static List<Zdm> processCrawl(String url, int retry) {

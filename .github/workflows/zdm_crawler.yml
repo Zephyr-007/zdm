@@ -61,12 +61,20 @@ jobs:
         cp ./target/zdm-0.0.1.jar ./zdm.jar
     - name: main logic
       env:
+        # 抓取模式: ranking只抓榜单, search只抓关注关键词搜索, both两者都抓
+        crawlMode: search
         #爬取数据时的最大翻页数量
         maxPageSize: 10
         # 点值的数量>minVoted,才会被推送,填0为都推送
         minVoted: 10
         # 评论的数量>minComments,才会被推送,填0为都推送
         minComments: 2
+        # 每个关注关键词搜索结果最大翻页数量
+        searchMaxPageSize: 1
+        # 搜索关注结果的点值数量>searchMinVoted,才会被推送
+        searchMinVoted: 2
+        # 搜索关注结果的评论数量>searchMinComments,才会被推送
+        searchMinComments: 2
         # 优惠信息数量>MIN_PUSH_SIZE就会发邮件,否则积累到下一次触发任务再决定是否推送. 不建议填太小的数字,避免邮件太多了
         MIN_PUSH_SIZE: 10
         # 邮箱的smtp服务器地址(示例给出的是qq邮箱的配置,非qq邮箱需要进行修改)

@@ -92,6 +92,34 @@
 * 若黑名单不为空, 仅会推送优惠信息的标题不包含黑名单中任意一个关键词的商品信息
 * 在同时配置了黑白名单两个文件时, 只有白名单会生效. 在两个文件内容都为空时, 代表关闭过滤规则
 
+### 关注关键词搜索
+
+`watch_words.txt`文件中可以自定义需要持续关注的搜索关键词. **多个关键词之间需要换行**   
+程序会按什么值得买搜索页的好价频道和最新排序抓取:
+
+```text
+https://search.smzdm.com/?c=faxian&s={关键词}&order=time&v=b&mx_v=b&p={页码}
+```
+
+在`./.github/workflows/zdm_crawler.yml`文件中可以配置:
+
+```yaml
+# ranking只抓榜单, search只抓关注关键词搜索, both两者都抓
+crawlMode: ranking
+# 每个关注关键词搜索结果最大翻页数量
+searchMaxPageSize: 1
+# 搜索关注结果的点值数量>searchMinVoted,才会被推送
+searchMinVoted: 0
+# 搜索关注结果的评论数量>searchMinComments,才会被推送
+searchMinComments: 0
+```
+
+如果只想关注关键词搜索, 不想抓好价榜单, 可以配置:
+
+```yaml
+crawlMode: search
+```
+
 
 # CHANGELOG
 
@@ -112,5 +140,4 @@
 | 2024/10/22 | 邮箱登陆切换到 stmp ssl 465 端口模式以解决 QQ 邮箱不再支持 stmp 明文模式问题                                                                                                                                                          |
 | 2023/5/4   | 已推送优惠信息按日期在logs文件夹下归类记录.避免单个文件记录数据量过大的问题                                                                                                                                                                    |
 | 2023/1/31  | 实现定时按什么值得买的好价排行榜,收集优惠信息并推送至邮箱的功能                                                                                                                                                                            |
-
 
