@@ -53,6 +53,7 @@ import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpUtil;
 import lx.mapper.ZdmMapper;
 import lx.model.CrawlMode;
+import lx.model.SearchSortMode;
 import lx.model.Zdm;
 import lx.utils.StreamUtils;
 import lx.utils.Utils;
@@ -77,13 +78,15 @@ public class ZdmCrawler {
                 searchMaxPageSize = Integer.parseInt(envMap.getOrDefault("searchMaxPageSize", "1")),
                 searchMinVoted = Integer.parseInt(envMap.getOrDefault("searchMinVoted", "0")),
                 searchMinComments = Integer.parseInt(envMap.getOrDefault("searchMinComments", "0")),
+                searchWithinDays = Integer.parseInt(envMap.getOrDefault("searchWithinDays", "3")),
                 minPushSize = Integer.parseInt(envMap.getOrDefault("MIN_PUSH_SIZE", "0"));
         boolean detail = "true".equals(envMap.getOrDefault("detail", "false"));
         CrawlMode crawlMode = CrawlMode.from(envMap.getOrDefault("crawlMode", "ranking"));
+        SearchSortMode searchSortMode = SearchSortMode.from(envMap.getOrDefault("searchSortMode", "score"));
 
         //获取并过滤待推送的优惠信息
         Collection<Zdm> zdms = obtainUnpushedArticles(maxPageSize, searchMaxPageSize, minVoted, minComments,
-                searchMinVoted, searchMinComments, crawlMode, detail);
+                searchMinVoted, searchMinComments, searchSortMode, searchWithinDays, crawlMode, detail);
         System.out.println("过滤后剩余数据条数" + zdms.size());
 
         //在推送之前先入库数据,pushed字段默认为0(未推送)
@@ -112,6 +115,7 @@ public class ZdmCrawler {
 
     private static Collection<Zdm> obtainUnpushedArticles(int maxPageSize, int searchMaxPageSize, int minVoted,
                                                           int minComments, int searchMinVoted, int searchMinComments,
+                                                          SearchSortMode searchSortMode, int searchWithinDays,
                                                           CrawlMode crawlMode, boolean detail) {
         //GitHub Actions部署的服务器一般在海外,调整为东八区的时区
         ZoneId zoneId = ZoneId.of("GMT+8");
@@ -126,8 +130,8 @@ public class ZdmCrawler {
             filtered.addAll(processFilter(obtainRankingArticles(maxPageSize, zoneId), minVoted, minComments, detail));
         }
         if (crawlMode.enableSearch()) {
-            SearchArticleCrawler searchArticleCrawler = new SearchArticleCrawler(ZdmCrawler::buildCookies, ZdmCrawler::clearCookie);
-            filtered.addAll(processFilter(searchArticleCrawler.obtainSearchArticles(searchMaxPageSize, detail),
+            SearchArticleCrawler searchArticleCrawler = new SearchArticleCrawler(ZdmCrawler::buildCookieHeader, ZdmCrawler::clearCookie);
+            filtered.addAll(processFilter(searchArticleCrawler.obtainSearchArticles(searchMaxPageSize, searchSortMode, searchWithinDays, detail),
                     searchMinVoted, searchMinComments, detail));
         }
 
@@ -360,6 +364,17 @@ public class ZdmCrawler {
             expiredDate = w_tsfp.getExpiry();
         }
         return cookies;
+    }
+
+    private static String buildCookieHeader() throws TimeoutException {
+        Map<String, String> envMap = System.getenv();
+        String cookie = envMap.getOrDefault("cookie", envMap.get("COOKIE"));
+        if (StringUtils.isNotBlank(cookie))
+            return cookie.trim();
+
+        return buildCookies().stream()
+                .map(c -> c.getName() + "=" + c.getValue())
+                .collect(Collectors.joining("; "));
     }
 
     private static void clearCookie() {

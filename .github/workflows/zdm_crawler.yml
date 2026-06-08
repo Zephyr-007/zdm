@@ -71,6 +71,10 @@ jobs:
         minComments: 2
         # 每个关注关键词搜索结果最大翻页数量
         searchMaxPageSize: 1
+        # 搜索排序: score综合/热度排序, time最新排序
+        searchSortMode: score
+        # 搜索结果只保留最近N天,0代表不过滤发布时间
+        searchWithinDays: 2
         # 搜索关注结果的点值数量>searchMinVoted,才会被推送
         searchMinVoted: 2
         # 搜索关注结果的评论数量>searchMinComments,才会被推送

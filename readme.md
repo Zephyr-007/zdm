@@ -95,10 +95,10 @@
 ### 关注关键词搜索
 
 `watch_words.txt`文件中可以自定义需要持续关注的搜索关键词. **多个关键词之间需要换行**   
-程序会按什么值得买搜索页的好价频道和最新排序抓取:
+程序会按什么值得买搜索页的好价频道抓取,排序方式可配置:
 
 ```text
-https://search.smzdm.com/?c=faxian&s={关键词}&order=time&v=b&mx_v=b&p={页码}
+https://search.smzdm.com/?c=faxian&s={关键词}&order={排序}&v=b&mx_v=b&p={页码}
 ```
 
 在`./.github/workflows/zdm_crawler.yml`文件中可以配置:
@@ -108,6 +108,10 @@ https://search.smzdm.com/?c=faxian&s={关键词}&order=time&v=b&mx_v=b&p={页码
 crawlMode: ranking
 # 每个关注关键词搜索结果最大翻页数量
 searchMaxPageSize: 1
+# score综合/热度排序, time最新排序
+searchSortMode: score
+# 搜索结果只保留最近N天,0代表不过滤发布时间
+searchWithinDays: 3
 # 搜索关注结果的点值数量>searchMinVoted,才会被推送
 searchMinVoted: 0
 # 搜索关注结果的评论数量>searchMinComments,才会被推送
@@ -140,4 +144,3 @@ crawlMode: search
 | 2024/10/22 | 邮箱登陆切换到 stmp ssl 465 端口模式以解决 QQ 邮箱不再支持 stmp 明文模式问题                                                                                                                                                          |
 | 2023/5/4   | 已推送优惠信息按日期在logs文件夹下归类记录.避免单个文件记录数据量过大的问题                                                                                                                                                                    |
 | 2023/1/31  | 实现定时按什么值得买的好价排行榜,收集优惠信息并推送至邮箱的功能                                                                                                                                                                            |
-

@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.MonthDay;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -29,6 +30,7 @@ import cn.hutool.http.Header;
 import cn.hutool.http.HttpException;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpUtil;
+import lx.model.SearchSortMode;
 import lx.model.Zdm;
 import lx.utils.Utils;
 import lx.utils.WatchWordConfig;
@@ -37,20 +39,20 @@ import static lx.utils.Const.MAX_RETRY;
 
 public class SearchArticleCrawler {
 
-    private static final String SEARCH_URL_TEMPLATE = "https://search.smzdm.com/?c=faxian&s=%s&order=time&v=b&mx_v=b&p=%d";
+    private static final String SEARCH_URL_TEMPLATE = "https://search.smzdm.com/?c=faxian&s=%s&order=%s&v=b&mx_v=b&p=%d";
     private static final Pattern ARTICLE_ID_PATTERN = Pattern.compile("/p/(\\d+)/");
     private static final Pattern MALL_PATTERN = Pattern.compile("dimension12':'([^']+)'");
     private static final Pattern TIME_PATTERN = Pattern.compile("(\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}|\\d{2}:\\d{2})");
 
-    private final CookieProvider cookieProvider;
+    private final CookieHeaderProvider cookieHeaderProvider;
     private final Runnable cookieCleaner;
 
-    public SearchArticleCrawler(CookieProvider cookieProvider, Runnable cookieCleaner) {
-        this.cookieProvider = cookieProvider;
+    public SearchArticleCrawler(CookieHeaderProvider cookieHeaderProvider, Runnable cookieCleaner) {
+        this.cookieHeaderProvider = cookieHeaderProvider;
         this.cookieCleaner = cookieCleaner;
     }
 
-    public List<Zdm> obtainSearchArticles(int maxPageSize, boolean detail) {
+    public List<Zdm> obtainSearchArticles(int maxPageSize, SearchSortMode sortMode, int withinDays, boolean detail) {
         List<String> watchWords = WatchWordConfig.readWatchWords();
         if (watchWords.isEmpty()) {
             System.out.println("watch_words.txt为空,跳过搜索关注抓取");
@@ -60,7 +62,7 @@ public class SearchArticleCrawler {
         Map<String, Zdm> result = new LinkedHashMap<>();
         for (String keyword : watchWords) {
             for (int page = 1; page <= maxPageSize; page++) {
-                List<Zdm> articles = crawlSearchPage(keyword, page, MAX_RETRY);
+                List<Zdm> articles = filterRecentArticles(crawlSearchPage(keyword, sortMode, page, MAX_RETRY), withinDays);
                 articles.forEach(article -> result.putIfAbsent(article.getArticleId(), article));
                 System.out.println("关键词[" + keyword + "]第" + page + "页搜索数据获取成功, 当前页数据条数" + articles.size());
                 ThreadUtil.sleep(ThreadLocalRandom.current().nextInt(1000, 2000));
@@ -73,16 +75,17 @@ public class SearchArticleCrawler {
         return new ArrayList<>(result.values());
     }
 
-    private List<Zdm> crawlSearchPage(String keyword, int page, int retry) {
-        String url = buildSearchUrl(keyword, page);
+    private List<Zdm> crawlSearchPage(String keyword, SearchSortMode sortMode, int page, int retry) {
+        String url = buildSearchUrl(keyword, sortMode, page);
         try {
             HttpRequest request = HttpUtil.createGet(url)
-                    .cookie(cookieProvider.buildCookies())
+                    .header(Header.COOKIE, cookieHeaderProvider.buildCookieHeader())
                     .header(Header.USER_AGENT, Utils.ramdomUserAgent())
                     .header(Header.REFERER, "https://search.smzdm.com/")
                     .header(Header.ACCEPT, "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
                     .header(Header.ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9,en;q=0.8")
-                    .header(Header.CONNECTION, "keep-alive");
+                    .header(Header.CONNECTION, "keep-alive")
+                    .timeout(15000);
 
             String html = request.execute().body();
             if (html.contains("probe.js") && !html.contains("feed-row-wide"))
@@ -95,15 +98,29 @@ public class SearchArticleCrawler {
                 System.out.println("搜索页调用失败,等待" + minutes + "分钟后进行重试,剩余重试次数:" + retry);
                 ThreadUtil.sleep((long) minutes * 60 * 1000);
                 cookieCleaner.run();
-                return crawlSearchPage(keyword, page, retry - 1);
+                return crawlSearchPage(keyword, sortMode, page, retry - 1);
             }
             e.printStackTrace();
             throw new RuntimeException("搜索页调用失败,程序终止");
         }
     }
 
-    private String buildSearchUrl(String keyword, int page) {
-        return String.format(SEARCH_URL_TEMPLATE, URLEncoder.encode(keyword, StandardCharsets.UTF_8), page);
+    private String buildSearchUrl(String keyword, SearchSortMode sortMode, int page) {
+        return String.format(SEARCH_URL_TEMPLATE, URLEncoder.encode(keyword, StandardCharsets.UTF_8), sortMode.getValue(), page);
+    }
+
+    private List<Zdm> filterRecentArticles(List<Zdm> articles, int withinDays) {
+        if (withinDays <= 0)
+            return articles;
+
+        LocalDateTime threshold = LocalDateTime.now(ZoneId.of("GMT+8")).minus(withinDays, ChronoUnit.DAYS);
+        List<Zdm> filtered = new ArrayList<>();
+        for (Zdm article : articles) {
+            LocalDateTime articleTime = LocalDateTime.parse(article.getArticle_time());
+            if (!articleTime.isBefore(threshold))
+                filtered.add(article);
+        }
+        return filtered;
     }
 
     private List<Zdm> parseSearchHtml(String html) {
@@ -185,7 +202,7 @@ public class SearchArticleCrawler {
         return LocalDate.now(zoneId).atTime(LocalTime.parse(timeText)).toString();
     }
 
-    public interface CookieProvider {
-        Collection<HttpCookie> buildCookies() throws TimeoutException;
+    public interface CookieHeaderProvider {
+        String buildCookieHeader() throws TimeoutException;
     }
 }
